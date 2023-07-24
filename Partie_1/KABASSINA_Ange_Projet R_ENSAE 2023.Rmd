@@ -1,0 +1,480 @@
+---
+output:
+  pdf_document:
+  keep_tex: yes
+  fig_caption: yes
+  toc: yes
+  toc_depth: 4
+  number_sections: yes
+header-includes: 
+  - \usepackage{pdfpages}
+  - \usepackage{graphicx}
+---
+
+\includepdf{page1.pdf}
+\setcounter{tocdepth}{2}				
+\renewcommand{\contentsname}{\textcolor{blue}{Sommaire}}
+\textcolor{black}{\tableofcontents}
+\newpage
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      message = FALSE,
+                      warning = FALSE,
+                      fig.align = 'center')
+
+# formater la sortie des tableau gtsummary
+library(gtsummary)
+theme_gtsummary_compact(set_theme = TRUE, font_size = NULL)
+
+```
+
+
+# Importation et mise en forme 
+
+## Importation de la base de données 
+
+```{r}
+# chargement du package nécessaire à l'importation 
+library(readxl)
+
+# Importation de la base sous format data.frame da,s l'objet projet 
+projet = readxl::read_excel("Base_Partie 1.xlsx")
+```
+
+## Selection des variables 
+
+Ici il est question de selectionner toutes les variables à l'éxception de la première "key".
+
+```{r}
+# chargement du package nécessaire au traitement de la base
+library(dplyr)
+
+# selection de toutes les variables sauf "key"
+# Importons `magrittr` pour acceder aux pipes
+library(magrittr)
+projet_select = projet %>% dplyr::select(2:last_col())
+```
+
+## Vérification des valeurs manquantes 
+
+### Tabulation du nombre de valeurs manquantes par variables 
+
+Pour ce faire, nous allons chercher le nombre de valeurs maquantes pour chaque variables grâce à la commande "sum(is.na())" que nous allons appliquer sur toutes les colones de notre dataframe grâce à une boucle for comme suit : 
+
+```{r}
+## liste pour contenir le nombre de variables manquantes
+var_na = c()
+for (i in 2:length(projet)){
+  var_na = c(var_na, projet %>% dplyr::select(i) %>% is.na() %>% sum())
+}
+```
+
+Une fois le nombre de valeurs manquantes par variables obtenues, nous allons créer un dataframe pour le contenir puis transformer ce dernier en tableau de format markdown (avec les tirets qui seviendra un vrai tableau après avoir été généré).
+
+```{r}
+## stocker le résultat (variables + nombre de na) dans un dataframe
+tab_na <- data.frame(variable = names(projet)[2:length(projet)], nombre_na = var_na)
+## ajouter une colone avec la proportion de NA:
+tab_na <- tab_na %>% mutate(proportion_na = nombre_na*100/nrow(projet))
+
+## Afficher le data.frame sous forme de tableau au format Markdown
+### nous allons utiliser kable_styling du package"kableExtra" pour mettre en forme notre tableau
+knitr::kable(tab_na, format = "markdown")
+```
+
+### Vérification des valeurs manquantes pour la variable "key"
+
+A présent nous allons prendre un cas particulier, celui de la variable "key" et vérifier si elle présente des valeurs manquantes toujours en utilisant sum(is.na())
+
+```{r}
+# vefication de l'existance de valeurs manquantes pour la variable "key"
+projet %>% dplyr::select("key") %>% is.na() %>% sum()
+```
+
+Il n'y a donc pas de valeurs manquantes pour la variable "key".
+
+Essayons à présent de vusualiser le taux de valeurs manquantes dans l'ensemble de la base, par variable de même que leur position grâce à la fonction vis_miss() du package visdat
+
+```{r}
+#visualisation avec vis_miss
+library(visdat)
+visdat::vis_miss(projet)
+```
+
+
+# Création de variables 
+
+## Renomination des variables q1, q2 et q23
+
+```{r}
+# renomination de variables 
+projet = projet %>% dplyr::rename("region" = "q1", "departement" = "q2", "sexe"="q23")
+
+```
+
+## Création de la variable "sexe_2"
+
+```{r}
+#création de la variable "sexe_2"
+projet = projet %>% dplyr::mutate(sexe_2 = ifelse(sexe=="Femme",1,0))
+```
+
+
+## Création du data.frame langue
+
+Nous allons pour créer le data.frame langue, selectionner la variable key de même que toutes les variables portant sur les langues c'est à dire toutes les variables commençant par "q24a_".
+
+```{r}
+# Création du data.frame langue
+langue = projet %>% dplyr::select("key",starts_with("q24a_"))
+```
+
+## Création de la variable parle
+
+La variable parle devant représenter le nombre de langue parler par le dirigeant de la PME sera calculé en faisant la somme des variables relatives aux langues puisque ces dernière prenne la valeur 1 quand le dirigeant parle la langue en question et 0 sinon.
+
+```{r}
+# Création de la variable parle = nombre de lanqgues parlées 
+langue = langue %>% dplyr::mutate(parle = rowSums(dplyr::select(langue,starts_with("q24a_")))) 
+```
+
+## Selection des variables les variables key et parle
+
+```{r}
+# Selection des variables les variables key et parle
+langues = langue %>% dplyr::select("key","parle")
+```
+
+## Fusion des data.frame projet et langues 
+
+```{r}
+# fusion des data.frame projet et langues 
+projet = merge(projet,langues, by = "key")
+```
+
+# Analyses descriptives 
+
+## Répartition des PME suivant le sexe du dirigeant 
+
+L'analyse du graphique ci-dessous révèle que plus de 7 PME sur 10 étudiées soit 76.4 % sont dirigées par des femmes.
+
+```{r}
+# Répartition des PME suivant le sexe du dirigeant
+# Tableau de fréquences
+knitr::kable(prop.table(table(projet$sexe))* 100, format = "markdown")
+
+# graphique en secteur
+library(plotrix)
+plotrix::pie3D(table(projet$sexe),labels = c("Femme","Homme") ,col = c("lightyellow","turquoise2"), main = "Sexe")
+
+```
+
+
+
+## Répartition des PME suivant le niveau d’instruction du dirigeant
+
+Concernant le niveau d'instruction, la majeure partie soit 31.6 % des dirigeants des PME de notre population n'ont aucun diplôme pendant que seulement 16 sur 100 (soit 16.4 %) ont fait des études supérieures.
+
+
+```{r}
+# Répartition des PME suivant le niveau d’instruction du dirigeant
+# Tableau de fréquences
+df = data.frame(prop.table(table(projet$q25))*100) # tableau de fréquence transformé en data.frame
+# renommons les colones de notre data.frame de façon plus significatives
+df = df %>% dplyr::rename("Niveau_instruction" = "Var1", "Frequence" = "Freq")
+
+# sortir le tableau sous format markdown 
+knitr::kable(df, format = "markdown")
+
+### diagramme en baton
+library(ggplot2)
+ggplot(df, aes(x = Niveau_instruction, y = Frequence))+
+  geom_col(fill = "turquoise3")+
+  geom_text(aes(label = Frequence), vjust = 1.6, color = "white")
+```
+
+## Répartition des PME suivant le statut juridique
+
+Une analyse du statut juridique des entreprises consignée dans le graphique ci-après suggère que sur les 250 PME étudiés, 179  soit 71.6 % sont des Groupement d'Intérêt économique (GIE) et que près de 15 PME sur 100  évoluent dans le secteur informel.
+
+
+```{r}
+# Répartition des PME suivant le statut juridique
+
+# Tableau de fréquences
+df = data.frame(prop.table(table(projet$q12))*100) # tableau de fréquence transformé en data.frame
+# renommons les colones de notre data.frame de façon plus significative
+df = df %>% dplyr::rename("statut_juridique" = "Var1", "Frequence" = "Freq")
+
+# sortir le tableau sous format markdown 
+knitr::kable(df, format = "markdown") 
+
+### diagramme en baton
+ggplot(df, aes(x = statut_juridique, y = Frequence))+
+  geom_col(fill = "aquamarine3")+
+  geom_text(aes(label = Frequence), vjust = -0.3, color = "black")
+
+```
+
+## Répartition des PME suivant le statut de propriété par rapport au local de l'entreprise (propriétaire ou locataire)
+
+En s'interressant au local occupé par les PME, ont remarque que la quasi totalité des PME étudiée soit jusqu'à  90.4 % sont  propriétaires de leur lieu de travail.
+
+```{r}
+### Répartition des PME suivant le statut de propriété par rapport au local 
+### de l'entreprise (propriétaire ou locataire)*
+
+# Tableau de fréquences
+df = data.frame(prop.table(table(projet$q81))*100) # tableau de fréquence transformé en data.frame
+# renommons les colones de notre data.frame de façon plus significative
+df = df %>% dplyr::rename("proprio_locataire" = "Var1", "Frequence" = "Freq")
+
+# sortir le tableau sous format markdown 
+knitr::kable(df, format = "markdown")
+
+# graphique en secteur
+ggplot(df, aes(x = "", y=Frequence, fill = factor(proprio_locataire))) +
+    geom_bar(width = 1, stat = "identity") +
+    theme(axis.line = element_blank(),
+          plot.title = element_text(hjust=0.5)) +
+       labs(fill="proprio_locataire",
+                    x=NULL,
+                    y=NULL, 
+                    title="Propriétaire ou locataire",
+                    caption="by KABASSINA G. Ange") + 
+  coord_polar(theta = "y", start=0)
+```
+
+
+## Répartition des PME suivant la filière d'activité
+
+Pour l'analyse par filière, nous allons créer une nouvelle variable "filiere". Cette variable sera créée en fonction de toutes les variables portant sur les filières et prendra le nom de la filière x pour laquelle la valeur de la variable "est dans la filière x" est 1.
+
+```{r}
+# Répartition des PME suivant la filière
+# création de la variable filiere
+projet = projet %>% dplyr::mutate(filiere = ifelse(filiere_1==1,"arachide",
+                                              ifelse(filiere_2==1,"anacarde",
+                                                ifelse(filiere_3==1,"mangue",
+                                    ifelse(filiere_4==1,"riz","n_s_p")))))
+
+
+# Tableau de fréquences
+df = data.frame(prop.table(table(projet$filiere))*100) # tableau de fréquence transformé en data.frame
+# renommons les colones de notre data.frame de façon plus significative
+df = df %>% dplyr::rename("filiere" = "Var1", "Frequence" = "Freq")
+
+# sortir le tableau sous format markdown 
+knitr::kable(df, format = "markdown") 
+
+# graphique en secteur
+library(RColorBrewer) #pour utiliser une palette de couleur prédéfinie
+
+ggplot(df, aes(x = "", y=Frequence, fill = factor(filiere))) + 
+    geom_bar(width = 1, stat = "identity") +
+  scale_fill_brewer(palette = "Pastel2") +
+    theme(axis.line = element_blank(),
+          plot.title = element_text(hjust=0.5)) +
+       labs(fill="filiere",
+                    x=NULL,
+                    y=NULL, 
+                    title="Filières",
+                    caption="by KABASSINA G. Ange") + 
+  coord_polar(theta = "y", start=0)
+
+
+```
+
+Il ressort ainsi que les PME étudiées évoluent dans plusieurs filières notamment l'arachide, la mangue, l'anarcade et le riz à raison respectivement de  43.2 %, 23.2 %, 20.4 % et 13.2 % des PME.
+
+## Répartion des PME suivant le sexe du dirigeant, son niveau d'instruction, le statut juridique de l'entreprise et le statut de propriété face au local de travail
+
+Pour faire cette analyse, nous utiliserons le package gtsummary pour n'avoir qu'un tableau.
+
+```{r}
+## Répartion des PME suivant le sexe du dirigeant, 
+## son niveau d'instruction, le statut juridique de l'entreprise 
+## et le statut de propriété face au local de travail
+library(gtsummary) # charger le package gtsummary
+
+# faire le tableau
+projet %>%
+  dplyr::select(sexe, q24,q12, q25, q81,filiere) %>%
+  gtsummary::tbl_summary(
+    ## paramètres de tbl_summary
+    by = sexe, 
+    ## variables qui forme les groupes: sexe
+    label = list(
+      sexe = "Sexe du dirigeant",
+      q24 = "Age du dirigeant",
+      q12 = "Statut juridique",
+      q25 = "Niveau d'instruction du dirigeant",
+      q81 = "Statut de propriété vis à vis du local de travail",
+      filiere = "Filière"
+    ),
+    ## ajouter les étiquettes des variables 
+    percent = "column", 
+    ## Type de pourcentage affichés dans le tableau 
+    statistic = q24 ~ "{median}", 
+    ## statistiques à calculer pour l'âge du dirigeant (médiane)
+    missing = "always", 
+    ## afficher les stat sur les valeurs manquantes
+    missing_text = "Missing", 
+    ## formatage et nomination de la variable "valeur manquante"
+  ) %>% 
+  add_difference() %>% 
+  ## afficher la différence entre les groupes, le test de significativité de la différence
+  add_stat_label() 
+  ## afficher une colonne qui signifie les statistiques calculées et leur format d'affichage. Ex: mean (sd)
+
+```
+
+Une analyse plus poussée des caractéristique des PME suivant le sexe de leur dirangeant révèle que la majeure partie des PME dirigées par les femmes sont des GIE (78 %) et des entreprises informelles (17 %) alors que chez leurs homologue masculins il s'agit plutôt de GIE (51 %)et de Société à responsabilités limitées (SARL 19%). Par ailleurs, les PME dirigées par les femmes évoluent plus dans les fillière arachide (49 %) et mangue (20 %) alors que celles dirigées par les hommes sont plus tournées vers les filières mangue (34 %) et anarcade (19 %).
+
+## Analyse du temps moyen mis pour recueillir les informations des PME
+
+Pour analyser cela, nous allons d'abord créer une variable durre qui calcule le temps écoulé entre le debut de l'entretien et la soumission des information.
+
+```{r}
+## Analyse du temps moyen mis pour recueillir les informations des PME
+projet = projet %>% dplyr::mutate(duree = submissiondate - start)
+### calcul de la durée minimale, maximale et moyenne 
+#### pour l'ensemble 
+tab = projet %>% summarise(min_duree = min(duree),
+                     max_duree = max(duree),
+                     mean_duree = mean(duree))
+
+knitr::kable(tab, format = "markdown")
+#### suivant le sexe
+tableau_stat <- projet %>%
+  group_by(sexe) %>%
+  summarise(min_duree = min(duree),
+            max_duree = max(duree),
+            mean_duree = mean(duree))
+
+knitr::kable(tableau_stat, format = "markdown")
+```
+
+Les résultats de la durée de soumission révèle qu'en moyenne les enquêteurs prennent en moyenne 9463.662 minutes soit 6 jours 13 heures pour soumettre les informations sur les PME. Par ailleurs, les information des PME dirigées par les hommes ont en moyenne une durée de soumission plus grande que celles sur les PME dirigées par les femmes.
+
+# Cartographie 
+
+## Transformer du data.frame en données géographiques 
+
+```{r}
+# chargement des packages nécessaires 
+library(sf)
+library(ggplot2)
+library(ggspatial)
+library(tmap)
+
+# conversion du dataframe en objet géographique du format sf
+projet_map <- projet  %>% sf::st_as_sf(coords= c("gps_menlongitude","gps_menlatitude"),crs = 4326)
+
+```
+
+## Répartition spaciale des PME suivant le sexe du dirigeant 
+
+Vu que les PME que nous souhaitons représenter proviennent d'Afrique de l'Ouest, nous allons d'abord représenter l'afrique de l'Ouest et y ajouter la position des PME par la suite.
+
+```{r}
+## Répartition spaciale des PME suivant le sexe du dirigeant 
+### représentons d'abord le Sénégal
+# Chargement des données sur le Sénégal 
+sen <- sf::st_read("donnees/Limite_Région.shp")
+
+# Représentation graphique 
+ggplot() +
+  geom_sf(data = sen, fill = "snow", color = "black") +
+  geom_sf(data = projet_map, aes(color = sexe), size = 1.5) +
+  scale_color_manual(values = c("hotpink3", "skyblue2")) +
+  geom_sf_text(data = sen, aes(label = NOMREG), nudge_y = 0.2, size = 2) +
+  annotation_scale(location = "bl", width_hint = 0.1) +
+  annotation_north_arrow(location = "tl", which_north = "true") +
+  theme_void() +
+  theme(legend.position = "right") +
+  labs(title = "Sénégal : répartition spatiale des PME suivant le sexe du dirigeant",
+       caption = "By KABASSINA Gnimdou Ange",
+       x = NULL, y = NULL,
+       color = "Sexe")
+
+```
+
+
+## Répartition spaciale des PME suivant le niveau d'instruction du dirigeant 
+
+
+```{r}
+
+## Répartition spaciale des PME suivant le niveau d'instruction du dirigeant
+ggplot() +
+  geom_sf(data = sen, fill = "snow", color = "black") +
+  geom_sf(data = projet_map, aes(color = q25), size = 1.5) +
+  scale_color_viridis_d() +
+  geom_sf_text(data = sen, aes(label = NOMREG), nudge_y = 0.2, size = 2) +
+  annotation_scale(location = "bl", width_hint = 0.1) +
+  annotation_north_arrow(location = "tl", which_north = "true") +
+  theme_void() +
+  theme(legend.position = "right") +
+  labs(title = "Sénégal : répartition spatiale des PME suivant le niveau d'instruction du dirigeant",
+       caption = "By KABASSINA Gnimdou Ange",
+       x = NULL, y = NULL,
+       color = "Niveau d'instruction ")
+
+```
+
+## Répartition spaciale des PME suivant la filière 
+
+
+```{r}
+# Répartition spaciale des PME suivant la filière 
+ggplot() +
+  geom_sf(data = sen, fill = "snow", color = "black") +
+  geom_sf(data = projet_map, aes(color = filiere), size = 1.5) +
+  scale_color_manual(values = c("hotpink3", "skyblue2","darkgreen","yellow")) +
+  geom_sf_text(data = sen, aes(label = NOMREG), nudge_y = 0.2, size = 2) +
+  annotation_scale(location = "bl", width_hint = 0.1) +
+  annotation_north_arrow(location = "tl", which_north = "true") +
+  theme_void() +
+  theme(legend.position = "right") +
+  labs(title = "Sénégal : répartition spatiale des PME suivant les filières d'activité",
+       caption = "By KABASSINA Gnimdou Ange",
+       x = NULL, y = NULL,
+       color = "Filières")
+
+```
+
+
+## Répartition spaciale des PME suivant le statut jurique de la PME
+
+
+```{r}
+# Répartition spaciale des PME suivant le statut jurique de la PME
+ggplot() +
+  geom_sf(data = sen, fill = "gray97", color = "black") +
+  geom_sf(data = projet_map, aes(color = q12), size = 1.5) +
+  scale_fill_manual(values = cm.colors(6))+
+  geom_sf_text(data = sen, aes(label = NOMREG), nudge_y = 0.2, size = 2) +
+  annotation_scale(location = "bl", width_hint = 0.1) +
+  annotation_north_arrow(location = "tl", which_north = "true") +
+  theme_void() +
+  theme(legend.position = "right") +
+  labs(title = "Sénégal : répartition spatiale des PME suivant le statut jurique de la PME",
+       caption = "By KABASSINA Gnimdou Ange",
+       x = NULL, y = NULL,
+       color = "Statut jurique de la PME")
+
+
+```
+
+
+
+
+
+
+
+
+
+
